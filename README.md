@@ -109,9 +109,10 @@ Every entry except the last one inside `people { }` needs a comma at the end.
 ## Putting it online with GitHub Pages
  
 1. Create a new repository on github.com
-2. Upload `star_family_tree_commented.html` and this README to the repo
-3. Go to Settings, then Pages, then set Source to main branch and save
-4. Your site goes live at `https://yourusername.github.io/repo-name/star_family_tree_commented.html`
+2. Upload `family_tree_constellation_template.html` and this README to the repo
+3. Update the template with your family's information and rename it to `index.html`
+4. Go to Settings, then Pages, then set Source to main branch and save
+5. Your site goes live at `https://yourusername.github.io/repo-name/star_family_tree_commented.html`
 To update: click the file on GitHub, click the pencil icon, edit the `people` section, click Commit changes. The live site updates in about 30 seconds.
  
 ---
