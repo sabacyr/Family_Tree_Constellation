@@ -1,4 +1,4 @@
-# Family Constellation
+# Family Constellation by Saba Cyr
  
 My grandmother used to tell me that the stars in the sky are our loved ones and families who have passed, looking down at us to protect us. I never forgot that. This project is my way of keeping that idea alive. Every person in my family gets a star. The older they are, the brighter and bigger it burns. You can hover over them, watch the constellation lines reach out to their family, and click to open their story.
  
@@ -132,6 +132,6 @@ To update: click the file on GitHub, click the pencil icon, edit the `people` se
  
 ## Technical notes
  
-One HTML file. No frameworks, no build step, no dependencies. The pixel font Press Start 2P loads from Google Fonts, if offline it falls back to Courier New. The family chart uses pure SVG rectangles and text elements, no foreignObject, so it renders correctly in all browsers. The sky runs on an HTML5 canvas at 60fps. The moon phase is calculated from a known reference date and the 29.53-day lunar cycle, no API needed. Stars are placed in a world coordinate space equal to the screen size so there is never empty black space at minimum zoom.
+One HTML file. The pixel font Press Start 2P loads from Google Fonts, if offline it falls back to Courier New. The family chart uses pure SVG rectangles and text elements, so it renders correctly in all browsers. The sky runs on an HTML5 canvas at 60fps. The moon phase is calculated from a known reference date and the 29.53-day lunar cycle. Stars are placed in a world coordinate space equal to the screen size so there is never empty black space at minimum zoom.
  
 ---
