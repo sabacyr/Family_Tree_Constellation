@@ -1,0 +1,1651 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Star Family Tree</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+<style>
+  /* Press Start 2P — pixel font used for panel labels and header */
+
+  /* --- Reset --- */
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  /* --- Full-screen page --- */
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #04020f; }
+
+  /* --- Main scene wrapper ---
+     cursor:grab shows the grab hand. When zoomed to minimum,
+     dragging is disabled (cursor stays default — see JS). */
+  #wrap { width: 100vw; height: 100vh; position: relative; overflow: hidden; cursor: grab; }
+  #wrap.dragging { cursor: grabbing; }
+  #wrap.no-drag  { cursor: default; }  /* applied at minimum zoom */
+
+  /* --- Canvas --- */
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+
+  /* ── Modal backdrop — full screen dim behind the window ────── */
+  #modal-backdrop {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(2, 1, 12, 0.7);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+    z-index: 199;
+    cursor: pointer;
+  }
+  #modal-backdrop.open { display: block; }
+
+  /* ── Family tree modal — centered floating window ───────────
+     90vw × 90vh, centered with top/left 5% each side.
+     Hidden with display:none by default, shown when .open added.
+  ─────────────────────────────────────────────────────────── */
+  #panel {
+    display: none;
+    position: fixed;
+    top: 5vh;
+    left: 5vw;
+    width: 90vw;
+    height: 90vh;
+    background: rgba(4, 2, 18, 0.75);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid rgba(160, 140, 255, 0.3);
+    border-radius: 14px;
+    overflow-y: auto;
+    overflow-x: hidden;
+    z-index: 200;
+    scrollbar-width: thin;
+    scrollbar-color: #2a1a5a rgba(4,2,18,0.3);
+    font-family: 'Courier New', monospace;
+    color: #c8c0f0;
+    font-size: 15px;
+    box-shadow: 0 0 60px rgba(100,80,200,0.25), 0 0 120px rgba(80,60,180,0.1);
+  }
+  #panel.open { display: block; animation: modal-in 0.25s ease both; }
+  #panel::-webkit-scrollbar { width: 6px; }
+  #panel::-webkit-scrollbar-track { background: rgba(4,2,18,0.3); }
+  #panel::-webkit-scrollbar-thumb { background: #2a1a5a; border-radius: 3px; }
+
+  @keyframes modal-in {
+    from { opacity: 0; transform: scale(0.96); }
+    to   { opacity: 1; transform: scale(1); }
+  }
+
+  /* Panel header — sticky at the top of the modal */
+  #ph {
+    position: sticky; top: 0;
+    background: rgba(4, 2, 18, 0.92);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    padding: 18px 28px 14px;
+    border-bottom: 1px solid rgba(160, 140, 255, 0.15);
+    border-radius: 14px 14px 0 0;
+    display: flex; justify-content: space-between; align-items: center;
+    z-index: 5;
+  }
+  #pt { font-size: 18px; font-weight: bold; color: #e8d8ff; letter-spacing: .06em; }
+  #pc {
+    cursor: pointer; background: none;
+    border: 1px solid rgba(160, 140, 255, 0.3);
+    color: #9080c0; font-family: monospace; font-size: 14px;
+    padding: 4px 14px; border-radius: 3px;
+  }
+  #pc:hover { background: rgba(160, 140, 255, 0.1); color: #e8d8ff; }
+
+  /* ── Ancestry chart SVG wrapper ──────────────────────────── */
+  #tree-svg-wrap {
+    padding: 24px 28px 48px;
+    overflow-x: auto;
+    overflow-y: visible;
+  }
+  #tree-svg-wrap svg {
+    display: block;
+    margin: 0 auto;
+    overflow: visible;
+  }
+  .sv-card { cursor: pointer; }
+  .sv-card:hover rect.card-bg { fill: rgba(160,140,255,0.12); }
+
+  /* ── Pixel font ──────────────────────────────────────────── */
+  #pt, .slbl, #help-btn {
+    font-family: 'Press Start 2P', monospace;
+    font-size: 12px !important;
+    letter-spacing: 0.04em;
+    line-height: 1.6;
+  }
+  #pt { font-size: 11px !important; color: #e8d8ff; }
+
+  /* ── Scanline CRT overlay ───────────────────────────────── */
+  #panel::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: repeating-linear-gradient(
+      to bottom,
+      rgba(0,0,0,0) 0px,
+      rgba(0,0,0,0) 3px,
+      rgba(0,0,20,0.13) 3px,
+      rgba(0,0,20,0.13) 4px
+    );
+    pointer-events: none;
+    border-radius: 14px;
+    z-index: 1;
+  }
+
+  /* ── Typing cursor animation ──────────────────────────────────
+     A blinking | cursor appended to the panel title during typing.
+  ─────────────────────────────────────────────────────────────── */
+  @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
+  .typing-cursor {
+    display: inline-block;
+    width: 2px; height: 1em;
+    background: #c8b8ff;
+    margin-left: 3px;
+    vertical-align: middle;
+    animation: blink 0.7s steps(1) infinite;
+  }
+
+  /* ── Twinkling star next to focal name ────────────────────────
+     A small ✦ that pulses next to the header title.
+  ─────────────────────────────────────────────────────────────── */
+  @keyframes twinkle-star {
+    0%,100% { opacity:1; transform:scale(1); }
+    50%      { opacity:0.3; transform:scale(0.7); }
+  }
+  #header-star {
+    display: inline-block;
+    color: #c8b8ff;
+    margin-right: 8px;
+    animation: twinkle-star 1.4s ease-in-out infinite;
+    font-size: 14px;
+  }
+
+  /* ── Staggered card load-in ───────────────────────────────────
+     SVG cards fade + slide up on load. Applied via JS by adding
+     a <style> block with per-card keyframe delays.
+  ─────────────────────────────────────────────────────────────── */
+  @keyframes card-in {
+    from { opacity: 0; transform: translateY(12px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  .sv-card { animation: card-in 0.35s ease both; }
+
+  /* ── Pixel corner brackets ────────────────────────────────────
+     Each card gets four tiny pixel-art corner markers drawn as
+     SVG rects in the chart builder (not CSS).
+  ─────────────────────────────────────────────────────────────── */
+
+  /* ── Intro overlay ───────────────────────────────────────────
+     Large centered box visible on load.
+     CHANGED: pointer-events now set to "all" so the click-to-dismiss
+     works. The overlay itself catches the first click and hides itself.
+     z-index 300 puts it above the help button too.
+  ─────────────────────────────────────────────────────────── */
+  #intro {
+    position: fixed;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    background: rgba(8, 4, 30, 0.94);
+    border: 1px solid rgba(160, 140, 255, 0.4);
+    border-radius: 14px;
+    padding: 40px 56px;
+    text-align: center;
+    font-family: 'Courier New', monospace;
+    color: rgba(210, 200, 255, 0.95);
+    font-size: 16px;
+    line-height: 2.1;
+    pointer-events: all;   /* catches clicks to dismiss */
+    z-index: 300;
+    transition: opacity 0.8s ease;
+    white-space: nowrap;
+    cursor: pointer;       /* hint that it's clickable */
+  }
+  #intro h2 {
+    font-size: 24px; color: #e8d8ff;
+    margin-bottom: 18px; letter-spacing: 0.1em;
+  }
+  #intro .dismiss {
+    display: block; margin-top: 20px;
+    font-size: 13px; color: rgba(160,150,220,0.6);
+    letter-spacing: 0.05em;
+  }
+
+  /* ── Help button (bottom-right) ─────────────────────────────
+     A small "?" button always visible. Clicking it reopens
+     the help overlay (same styling as intro but with pointer events).
+  ─────────────────────────────────────────────────────────── */
+  #help-btn {
+    position: fixed;
+    bottom: 20px; right: 20px;
+    width: 38px; height: 38px;
+    background: rgba(8, 4, 30, 0.85);
+    border: 1px solid rgba(160, 140, 255, 0.35);
+    border-radius: 50%;
+    color: rgba(180, 160, 255, 0.8);
+    font-family: 'Courier New', monospace;
+    font-size: 18px;
+    cursor: pointer;
+    z-index: 100;
+    display: flex; align-items: center; justify-content: center;
+    transition: background 0.2s, color 0.2s;
+  }
+  #help-btn:hover { background: rgba(80, 60, 160, 0.5); color: #e8d8ff; }
+
+  /* ── Help modal (same look as intro, reopened by ? button) ──
+     Hidden by default (opacity 0, pointer-events none).
+     JS toggles it visible.
+  ─────────────────────────────────────────────────────────── */
+  #help-modal {
+    position: fixed;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    background: rgba(8, 4, 30, 0.94);
+    border: 1px solid rgba(160, 140, 255, 0.4);
+    border-radius: 14px;
+    padding: 40px 56px;
+    text-align: center;
+    font-family: 'Courier New', monospace;
+    color: rgba(210, 200, 255, 0.95);
+    font-size: 16px;
+    line-height: 2.1;
+    z-index: 250;
+    white-space: nowrap;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.4s ease;
+    cursor: pointer;
+  }
+  #help-modal.visible { opacity: 1; pointer-events: all; }
+  #help-modal h2 { font-size: 22px; color: #e8d8ff; margin-bottom: 18px; letter-spacing: 0.08em; }
+  #help-modal .dismiss { display: block; margin-top: 20px; font-size: 13px; color: rgba(160,150,220,0.6); }
+
+  /* ── Footer — bottom center ─────────────────────────────────
+     Credit bar with name, GitHub link, and last updated year.
+  ─────────────────────────────────────────────────────────── */
+  #footer {
+    position: fixed;
+    bottom: 14px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-family: 'Courier New', monospace;
+    font-size: 12px;
+    color: rgba(160, 150, 220, 0.55);
+    pointer-events: none;
+    z-index: 10;
+    white-space: nowrap;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  #footer a {
+    pointer-events: all;
+    color: rgba(180, 170, 240, 0.7);
+    text-decoration: none;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    transition: color 0.2s;
+  }
+  #footer a:hover { color: rgba(220, 210, 255, 0.95); }
+  #footer .gh-icon {
+    width: 14px; height: 14px;
+    fill: rgba(180, 170, 240, 0.7);
+    vertical-align: middle;
+    transition: fill 0.2s;
+  }
+  #footer a:hover .gh-icon { fill: rgba(220, 210, 255, 0.95); }
+
+  /* ── Clock bar (bottom-left) ─────────────────────────────── */
+  #clockbar {
+    position: fixed;
+    bottom: 18px; left: 20px;
+    font-family: 'Courier New', monospace;
+    color: rgba(180, 170, 230, 0.7);
+    pointer-events: none;
+    z-index: 10;
+    line-height: 1.6;
+  }
+  #clockbar .clock-time { font-size: 20px; color: rgba(210,200,255,0.85); letter-spacing: 0.05em; }
+  #clockbar .clock-date { font-size: 13px; color: rgba(150,140,200,0.6); }
+
+</style>
+</head>
+<body>
+
+<div id="wrap">
+
+  <canvas id="c"></canvas>
+
+  <!-- Modal backdrop — clicking it closes the panel -->
+  <div id="modal-backdrop"></div>
+
+  <!-- Family tree modal window — centered, 90% of screen -->
+  <div id="panel">
+    <div id="ph">
+      <span id="pt">Family Tree</span>
+      <button id="pc">✕ close</button>
+    </div>
+    <!-- SVG ancestry chart is injected here by buildAncestryChart() -->
+    <div id="tree-svg-wrap"></div>
+  </div>
+
+  <!--
+    INTRO OVERLAY
+    Visible immediately on load. Dismissed by clicking anywhere on it.
+    pointer-events:all means it catches the click and hides itself.
+    After dismissing, the ? button lets the user re-read the instructions.
+  -->
+  <div id="intro">
+    <h2>✦ Star Family Tree ✦</h2>
+    scroll to zoom &nbsp;·&nbsp; drag to pan (when zoomed in)<br>
+    hover a star to see family connections<br>
+    click a star to open the family panel<br>
+    click any name in the panel to navigate<br>
+    <span class="dismiss">click here to begin ✦</span>
+  </div>
+
+  <!-- Help modal — same content, reopened by ? button -->
+  <div id="help-modal">
+    <h2>✦ How to navigate ✦</h2>
+    scroll up/down &nbsp;·&nbsp; zoom in and out<br>
+    drag &nbsp;·&nbsp; pan around when zoomed in<br>
+    hover a star &nbsp;·&nbsp; see family constellation lines<br>
+    click a star &nbsp;·&nbsp; open the family tree panel<br>
+    click a name in the panel &nbsp;·&nbsp; jump to that person<br>
+    <span class="dismiss">click to close ✦</span>
+  </div>
+
+  <!-- ? button — bottom right -->
+  <button id="help-btn" aria-label="Help">?</button>
+
+  <!-- Footer — bottom center -->
+  <div id="footer">
+    <span>made by Saba Cyr</span>
+    <span style="opacity:0.4;">·</span>
+    <a href="https://github.com/sabacyr" target="_blank" rel="noopener">
+      <!-- GitHub logo SVG -->
+      <svg class="gh-icon" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+        <path d="M12 0C5.37 0 0 5.37 0 12c0 5.3 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577
+          0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61-.546-1.385-1.335-1.755
+          -1.335-1.755-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236
+          1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466
+          -1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176
+          0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405
+          2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23
+          1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22
+          0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 21.795 24 17.295
+          24 12c0-6.63-5.37-12-12-12z"/>
+      </svg>
+      github.com/sabacyr
+    </a>
+    <span style="opacity:0.4;">·</span>
+    <span>last updated 2026</span>
+  </div>
+
+  <!-- Clock bar — bottom left -->
+  <div id="clockbar">
+    <div class="clock-time" id="clock-time">00:00:00</div>
+    <div class="clock-date" id="clock-date">Sunday, 1 January</div>
+  </div>
+
+</div>
+
+<script>
+
+  // ══════════════════════════════════════════════════════════════
+  //  1. FAMILY DATA  ← THIS IS THE ONLY SECTION YOU NEED TO EDIT
+  //
+  //  HOW TO ADD A PERSON:
+  //  Copy any existing line and change the values. Rules:
+  //
+  //  px:  { ... }   — "px" is a unique ID you make up (p1, p2, p3...)
+  //                   It can be anything — just must be unique.
+  //
+  //  REQUIRED fields:
+  //    name:    "First Last"          — full name in quotes
+  //    born:    1970                  — birth year (number, no quotes)
+  //    died:    1990  or  null        — death year, or null if alive
+  //    size:    9                     — star size (see guide below)
+  //    color:   "#90d8ff"             — star color (hex code)
+  //    gender:  "m"  or  "f"          — for panel card color coding
+  //
+  //  OPTIONAL fields:
+  //    spouse:   "p2"                 — ID of their spouse
+  //    parents:  ["p1","p2"]          — IDs of father and mother
+  //    divorced: true                 — shows ✕ instead of ♥ between couple
+  //
+  //  STAR SIZE GUIDE (pick the closest generation):
+  //    19  — great-grandparents (oldest / most prominent)
+  //    15  — grandparents
+  //    12  — parents
+  //     9  — your generation
+  //    7.5 — children / youngest
+  //
+  //  STAR COLOR IDEAS (one color per generation or family branch):
+  //    "#ffd97a"  warm gold      "#c8b8ff"  soft purple
+  //    "#90d8ff"  sky blue       "#b8f0c8"  mint green
+  //    "#ffc8e8"  pink           "#ffb870"  amber
+  //
+  //  EXAMPLE — adding a new person:
+  //    p16: { name:"Sarah Jones", born:1985, died:null,
+  //           spouse:"p13", parents:["p7","p8"],
+  //           size:9, color:"#98b0ff", gender:"f" },
+  //
+  //  IMPORTANT: every line except the last one inside people{} needs
+  //  a comma at the end. The last line before the closing }; does not.
+  // ══════════════════════════════════════════════════════════════
+
+  const people = {
+    p1: {name:"Golchehreh ??", born:null, died:null, spouse:"p2", parents:[], size:13, color:"#ffd97a", gender:"f"},
+    p2: {name:"Shaban Rezaei", born:null, died:2025, spouse:"p1", parents:[], size:13, color:"#ffc94a", gender:"m"},
+
+    p3: {name:"Havva ??", born:null, died:null, spouse:"p4", parents:[], size:13, color:"#ffaa55", gender:"f"},
+    p4: {name:"Azizollah Molaei", born:null, died:2009, spouse:"p3", parents:[], size:13, color:"#ff9933", gender:"m"},
+
+    p5: {name:"Gloria Jacksoncyr", born:1931, died:2013, spouse:"p6", parents:[], size:13, color:"#c8a8ff", gender:"f"},
+    p6: {name:"Anthony J. Cyr", born:1927, died:2008, spouse:"p5", parents:[], size:13, color:"#b090ff", gender:"m"},
+
+    p7: {name:"Theresa R. Cyr", born:1924, died:2023, spouse:"p8", parents:[], size:13, color:"#a0b8ff", gender:"f"},
+    p8: {name:"Real Joseph Cyr", born:1925, died:2016, spouse:"p7", parents:[], size:13, color:"#8090ee", gender:"m"},
+
+    p9: {name:"Manizheh Rezaei", born:1975, died:null, spouse:"p10", parents:["p1","p2"], size:13, color:"#80ffcc", gender:"f"},
+    p10: {name:"Ebrahim Molaei", born:1973, died:null, spouse:"p9", parents:["p3","p4"], size:13, color:"#60ddaa", gender:"m"},
+
+    p11: {name:"Robin Rae Cyr", born:1965, died:null, spouse:"p12", parents:["p5","p6"], size:13, color:"#d4b8ff", gender:"f"},
+    p12: {name:"Ralph Lane", born:null, died:null, spouse:"p11", parents:[], size:13, color:"#b8a0e8", gender:"m"},
+
+    p13: {name:"Richard Cyr", born:null, died:null, spouse:"p14", parents:["p7","p8"], size:13, color:"#90a8ff", gender:"m"},
+    p14: {name:"Mary Etta Cyr", born:1954, died:2024, spouse:"p13", parents:[], size:13, color:"#7888ee", gender:"f"},
+
+    p15: {name:"Susan Cyr", born:null, died:null, spouse:null, parents:["p7","p8"], size:13, color:"#b0c4ff", gender:"f"},
+
+    p16: {name:"Jeanne Pelletier (nee Cyr)", born:null, died:null, spouse:"p17", parents:["p7","p8"], size:13, color:"#98b0ff", gender:"f"},
+    p17: {name:"Alan Pelletier", born:null, died:null, spouse:"p16", parents:[], size:13, color:"#7090ee", gender:"m"},
+
+    p18: {name:"Victoria Dute-Martinez (nee Cyr)", born:null, died:null, spouse:"p19", parents:["p7","p8"], size:13, color:"#a0b8ff", gender:"f"},
+    p19: {name:"Nicholas Martinez", born:null, died:null, spouse:"p18", parents:[], size:13, color:"#8898dd", gender:"m"},
+
+    p20: {name:"Andrew A. Cyr", born:null, died:null, spouse:"p21", parents:["p7","p8"], size:13, color:"#88a0ff", gender:"m"},
+    p21: {name:"Susan Cyr (nee ??)", born:null, died:null, spouse:"p20", parents:[], size:13, color:"#7090dd", gender:"f"},
+
+    p22: {name:"Ilene Hughes (nee Cyr)", born:null, died:null, spouse:"p23", parents:["p5","p6"], size:13, color:"#cc9fff", gender:"f"},
+    p23: {name:"John Hughes", born:null, died:null, spouse:"p22", parents:[], size:13, color:"#aa88dd", gender:"m"},
+
+    p24: {name:"Timothy Cyr", born:null, died:null, spouse:null, parents:["p5","p6"], size:13, color:"#e0c8ff", gender:"m"},
+
+    p25: {name:"Eric Cyr", born:null, died:null, spouse:"p26", parents:["p5","p6"], size:13, color:"#c0a0ff", gender:"m"},
+    p26: {name:"Tara Mitchell", born:null, died:null, spouse:"p25", parents:[], size:13, color:"#a888ee", gender:"f"},
+
+    p27: {name:"Khadijeh Rezaei", born:null, died:null, spouse:"p28", parents:["p1","p2"], size:13, color:"#ffdd88", gender:"f"},
+    p28: {name:"Ghorban Khorshidi", born:null, died:null, spouse:"p27", parents:[], size:13, color:"#ddbb66", gender:"m"},
+
+    p29: {name:"Majid Rezaei", born:null, died:null, spouse:"p30", parents:["p1","p2"], size:13, color:"#ffd060", gender:"m"},
+    p30: {name:"Zohreh", born:null, died:null, spouse:"p29", parents:[], size:13, color:"#ddaa44", gender:"f"},
+
+    p31: {name:"Mohammad Rezaei", born:1974, died:null, spouse:"p32", parents:["p1","p2"], size:13, color:"#ffcc55", gender:"m"},
+    p32: {name:"Unknown", born:null, died:null, spouse:"p31", parents:[], size:13, color:"#ddaa44", gender:"f"},
+
+    p33: {name:"Mehdi Rezaei", born:null, died:null, spouse:"p34", parents:["p1","p2"], size:13, color:"#ffbb44", gender:"m"},
+    p34: {name:"Sanaz", born:null, died:null, spouse:"p33", parents:[], size:13, color:"#dd9933", gender:"f"},
+
+    p35: {name:"Esmaeil Rezaei", born:null, died:null, spouse:"p36", parents:["p1","p2"], size:13, color:"#ffaa44", gender:"m"},
+    p36: {name:"Unknown", born:null, died:null, spouse:"p35", parents:[], size:13, color:"#dd8833", gender:"f"},
+
+    p37: {name:"Eisa Rezaei", born:null, died:null, spouse:"p38", parents:["p1","p2"], size:13, color:"#ff9944", gender:"m"},
+    p38: {name:"Sahar", born:null, died:null, spouse:"p37", parents:[], size:13, color:"#dd7722", gender:"f"},
+
+    p39: {name:"Javad Molaei", born:null, died:null, spouse:"p40", parents:["p3","p4"], size:13, color:"#ffcc88", gender:"m"},
+    p40: {name:"Unknown", born:null, died:null, spouse:"p39", parents:[], size:13, color:"#ddaa66", gender:"f"},
+
+    p41: {name:"Esmaeil Molaei", born:null, died:null, spouse:"p42", parents:["p3","p4"], size:13, color:"#ffbb77", gender:"m"},
+    p42: {name:"Unknown", born:null, died:null, spouse:"p41", parents:[], size:13, color:"#dd9955", gender:"f"},
+
+    p43: {name:"Mohammad Molaei", born:null, died:2009, spouse:null, parents:["p3","p4"], size:13, color:"#ffaa66", gender:"m"},
+
+    p44: {name:"Ahmad Molaei", born:null, died:null, spouse:"p45", parents:["p3","p4"], size:13, color:"#ff9955", gender:"m"},
+    p45: {name:"Unknown", born:null, died:null, spouse:"p44", parents:[], size:13, color:"#dd7733", gender:"f"},
+
+    p46: {name:"Nicolas Andrew Cyr", born:1999, died:null, spouse:"p47", parents:["p11","p20"], size:12, color:"#ffa8c8", gender:"m"},
+    p47: {name:"Saba Cyr (nee Molaei)", born:2000, died:null, spouse:"p46", parents:["p9","p10"], size:12, color:"#ff88aa", gender:"f"},
+
+    p48: {name:"Soroush Molaei", born:2010, died:null, spouse:null, parents:["p9","p10"], size:12, color:"#ffb8d0", gender:"m"},
+
+  };
+
+
+  // ══════════════════════════════════════════════════════════════
+  //  2. CANVAS SETUP
+  // ══════════════════════════════════════════════════════════════
+
+  const canvas = document.getElementById('c');
+  const ctx    = canvas.getContext('2d');
+  let W = 0, H = 0;
+
+
+  // ══════════════════════════════════════════════════════════════
+  //  3. CAMERA STATE
+  //
+  //  cam.x, cam.y  — world coordinate at the center of the screen
+  //  cam.zoom      — current zoom level
+  //  cam.minZoom   — calculated in assignPositions(); the zoom level
+  //                  that fits all stars exactly on screen with padding.
+  //                  User can never zoom out past this.
+  //
+  //  WORLD BOUNDS (worldBounds):
+  //  Also set in assignPositions(). Stores the min/max x and y of
+  //  all star positions. Used during dragging to clamp the camera
+  //  so you can't drag to empty space — only pan over the star field.
+  // ══════════════════════════════════════════════════════════════
+
+  let cam = { x:900, y:600, zoom:1, minZoom:0.1 };
+  let drag = { active:false, sx:0, sy:0, cx:0, cy:0 };
+
+  // World bounding box of all star positions — set in assignPositions()
+  let worldBounds = { minX:0, maxX:1800, minY:0, maxY:1000 };
+
+
+  // ══════════════════════════════════════════════════════════════
+  //  4. EFFECT STATE
+  // ══════════════════════════════════════════════════════════════
+
+  let hoverId   = null;
+  const positions = {};
+  let sparkles  = [];
+  let shooters  = [];
+  let nextShoot = 3000;
+  let lineAlpha = 0;
+  let prevHover = null;
+
+
+  // ══════════════════════════════════════════════════════════════
+  //  5. BACKGROUND STARS (decorative)
+  // ══════════════════════════════════════════════════════════════
+
+  // Background stars are stored as FRACTIONS of screen size (0.0–1.0).
+  // Drawing them as (s.x * W, s.y * H) means they always cover the
+  // full screen uniformly — no camera transform, no parallax offset,
+  // so corners and edges are filled just as densely as the center.
+  const bgStars = Array.from({ length: 1200 }, () => ({
+    x:  Math.random(),           // fraction of screen width  (0–1)
+    y:  Math.random(),           // fraction of screen height (0–1)
+    r:  Math.random() * 0.9  + 0.2,
+    a:  Math.random() * 0.55 + 0.15,
+    ph: Math.random() * Math.PI * 2
+  }));
+
+
+  // ══════════════════════════════════════════════════════════════
+  //  6. NEBULA BLOBS
+  // ══════════════════════════════════════════════════════════════
+
+  // Each nebula has a distinct, saturated color and higher opacity so
+  // they're actually visible and clearly different from one another.
+  // Colors: vivid violet, deep cobalt blue, bright teal, hot magenta,
+  //         electric indigo, and warm rose — spread around the sky.
+  const nebulae = [
+    { x:400,  y:150,  rx:340, ry:200, color:'rgba(140, 60, 255,', a:0.13, rot:0.3  }, // vivid violet  — top-left
+    { x:1400, y:600,  rx:320, ry:220, color:'rgba( 20,120, 255,', a:0.12, rot:-0.2 }, // cobalt blue   — right
+    { x:650,  y:850,  rx:380, ry:180, color:'rgba(  0,210, 200,', a:0.11, rot:0.7  }, // bright teal   — bottom-centre
+    { x:150,  y:650,  rx:230, ry:270, color:'rgba(220,  0, 180,', a:0.10, rot:-0.4 }, // hot magenta   — left
+    { x:1650, y:220,  rx:290, ry:210, color:'rgba( 80, 40, 255,', a:0.12, rot:0.5  }, // electric indigo — top-right
+    { x:1050, y:380,  rx:260, ry:170, color:'rgba(255,  60, 140,', a:0.09, rot:1.1  }, // warm rose     — centre
+  ];
+
+
+  // ══════════════════════════════════════════════════════════════
+  //  7. ASSIGN STAR POSITIONS, SET MIN ZOOM, SET WORLD BOUNDS
+  //
+  //  Stars are placed randomly with rejection sampling (min 100px apart).
+  //
+  //  After placement we compute:
+  //    1. minZoom — the zoom that fits every star on screen with
+  //       a 5% padding margin. This is the zoom the page opens at,
+  //       and the user can never zoom out past it.
+  //    2. worldBounds — the rectangle enclosing all stars.
+  //       Used to clamp panning so the camera can never drift to
+  //       empty space beyond the star field.
+  // ══════════════════════════════════════════════════════════════
+
+  function assignPositions() {
+    // ── THE CORE FIX ──────────────────────────────────────────
+    // The world coordinate space is set to EXACTLY match the screen
+    // in pixels. At zoom = 1, one world unit = one screen pixel,
+    // so the world fills the screen perfectly — no empty borders.
+    //
+    // Stars are scattered across the screen with a small edge margin
+    // so no star is clipped. worldBounds = the full screen rectangle.
+    // minZoom = 1, meaning you can never zoom out past "see everything".
+    // ──────────────────────────────────────────────────────────
+
+    const margin = 80; // keep stars this many px from the screen edge
+
+    // World = screen. At zoom 1, world fills screen exactly.
+    worldBounds = { minX: 0, maxX: W, minY: 0, maxY: H };
+
+    // Camera center = center of screen
+    cam.x = W / 2;
+    cam.y = H / 2;
+
+    // minZoom = 1: the world IS the screen. Zooming out past 1 would
+    // show empty space outside the world, so we disallow it.
+    cam.minZoom = 1;
+    cam.zoom    = 1;
+
+    // Place each star randomly within the screen (minus edge margin).
+    // Rejection sampling: retry until no two stars are closer than minDist.
+    const ids     = Object.keys(people);
+    const placed  = [];
+    const minDist = 110;
+
+    // Moon is fixed at (W*0.88, 70) on screen — keep stars away from it.
+    // 150px exclusion radius covers the moon + its glow comfortably.
+    const moonX = W * 0.88;
+    const moonY = 70;
+    const moonClear = 150;
+
+    ids.forEach(id => {
+      let x, y, ok, tries = 0;
+      do {
+        x  = margin + Math.random() * (W - margin * 2);
+        y  = margin + Math.random() * (H - margin * 2);
+        const clearOfOthers = placed.every(p => Math.hypot(p.x - x, p.y - y) > minDist);
+        const clearOfMoon   = Math.hypot(x - moonX, y - moonY) > moonClear;
+        ok = clearOfOthers && clearOfMoon;
+        tries++;
+      } while (!ok && tries < 600);
+      placed.push({ x, y });
+      positions[id] = { x, y };
+    });
+  }
+
+
+  // ══════════════════════════════════════════════════════════════
+  //  8. RESIZE
+  // ══════════════════════════════════════════════════════════════
+
+  function resize() {
+    W = canvas.width  = window.innerWidth;
+    H = canvas.height = window.innerHeight;
+    // Re-assign positions on resize so worldBounds stays = screen size.
+    // This means stars re-scatter on resize, which is correct behaviour
+    // since the world definition (= screen) has changed dimensions.
+    if (Object.keys(positions).length > 0) {
+      assignPositions();
+    }
+  }
+
+
+  // ══════════════════════════════════════════════════════════════
+  //  9. COORDINATE HELPERS
+  // ══════════════════════════════════════════════════════════════
+
+  function toScreen(wx, wy) {
+    return [
+      (wx - cam.x) * cam.zoom + W / 2,
+      (wy - cam.y) * cam.zoom + H / 2
+    ];
+  }
+  function toWorld(sx, sy) {
+    return [
+      (sx - W / 2) / cam.zoom + cam.x,
+      (sy - H / 2) / cam.zoom + cam.y
+    ];
+  }
+
+
+  // ══════════════════════════════════════════════════════════════
+  //  10. CLAMP CAMERA TO WORLD BOUNDS
+  //
+  //  Called after every pan or zoom to prevent the camera from
+  //  drifting into empty space outside the star field.
+  //
+  //  At any zoom level, the visible half-width in world units is:
+  //    halfW = (W/2) / zoom
+  //  The camera center (cam.x) must stay between:
+  //    worldBounds.minX + halfW  and  worldBounds.maxX - halfW
+  //  Otherwise the screen edge would show space beyond the world.
+  //  Same logic applies vertically.
+  //
+  //  If the world is smaller than the screen at this zoom (e.g. at
+  //  minZoom), we just center it — no clamping needed.
+  // ══════════════════════════════════════════════════════════════
+
+  function clampCamera() {
+    const halfW = (W / 2) / cam.zoom;
+    const halfH = (H / 2) / cam.zoom;
+
+    const worldW = worldBounds.maxX - worldBounds.minX;
+    const worldH = worldBounds.maxY - worldBounds.minY;
+
+    if (worldW * cam.zoom <= W) {
+      // World fits horizontally — center it
+      cam.x = (worldBounds.minX + worldBounds.maxX) / 2;
+    } else {
+      cam.x = Math.max(worldBounds.minX + halfW,
+              Math.min(worldBounds.maxX - halfW, cam.x));
+    }
+
+    if (worldH * cam.zoom <= H) {
+      // World fits vertically — center it
+      cam.y = (worldBounds.minY + worldBounds.maxY) / 2;
+    } else {
+      cam.y = Math.max(worldBounds.minY + halfH,
+              Math.min(worldBounds.maxY - halfH, cam.y));
+    }
+  }
+
+
+  // ══════════════════════════════════════════════════════════════
+  //  11. DRAW A 5-POINTED STAR SHAPE
+  // ══════════════════════════════════════════════════════════════
+
+  function drawStarShape(cx, cy, r, fill, alpha) {
+    ctx.globalAlpha = alpha;
+    ctx.beginPath();
+    for (let i = 0; i < 10; i++) {
+      const angle  = i * Math.PI / 5 - Math.PI / 2;
+      const radius = i % 2 === 0 ? r : r * 0.42;
+      i === 0
+        ? ctx.moveTo(cx + Math.cos(angle) * radius, cy + Math.sin(angle) * radius)
+        : ctx.lineTo(cx + Math.cos(angle) * radius, cy + Math.sin(angle) * radius);
+    }
+    ctx.closePath();
+    ctx.fillStyle = fill;
+    ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+
+
+  // ══════════════════════════════════════════════════════════════
+  //  12. HEX → RGB HELPER
+  // ══════════════════════════════════════════════════════════════
+
+  function hexToRgb(hex) {
+    return `${parseInt(hex.slice(1,3),16)},${parseInt(hex.slice(3,5),16)},${parseInt(hex.slice(5,7),16)}`;
+  }
+
+
+  // ══════════════════════════════════════════════════════════════
+  //  13. GET RELATIVES
+  // ══════════════════════════════════════════════════════════════
+
+  function getRelatives(id) {
+    const p = people[id]; if (!p) return [];
+    const s = new Set();
+    if (p.spouse) s.add(p.spouse);
+    (p.parents || []).forEach(x => s.add(x));
+    Object.entries(people).forEach(([oid, o]) => {
+      if ((o.parents || []).includes(id)) s.add(oid);
+    });
+    return [...s];
+  }
+
+
+  // ══════════════════════════════════════════════════════════════
+  //  14. MAIN DRAW LOOP
+  // ══════════════════════════════════════════════════════════════
+
+  let lastT = 0;
+
+  function draw(ts) {
+    const dt = Math.min(ts - lastT, 50);
+    lastT = ts;
+    ctx.clearRect(0, 0, W, H);
+
+
+    // ── Sky gradient ───────────────────────────────────────────
+    const grad = ctx.createLinearGradient(0, 0, 0, H);
+    grad.addColorStop(0, '#04020f');
+    grad.addColorStop(1, '#0d0525');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, W, H);
+
+
+    // ── Nebula clouds ──────────────────────────────────────────
+    nebulae.forEach((n, i) => {
+      const [sx, sy] = toScreen(n.x, n.y);
+      ctx.save();
+      ctx.translate(sx, sy);
+      ctx.rotate(n.rot + ts * 0.00003 * (i % 2 === 0 ? 1 : -1));
+      const ng = ctx.createRadialGradient(0, 0, 10, 0, 0, n.rx * cam.zoom);
+      ng.addColorStop(0,   n.color + (n.a * 1.6) + ')');
+      ng.addColorStop(0.5, n.color + n.a + ')');
+      ng.addColorStop(1,   'rgba(0,0,0,0)');
+      ctx.scale(1, n.ry / n.rx);
+      ctx.fillStyle = ng;
+      ctx.beginPath(); ctx.arc(0, 0, n.rx * cam.zoom, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
+    });
+
+
+    // ── Background twinkle stars (screen-fixed) ───────────────
+    // Stored as fractions; multiplied by W/H each frame so they
+    // always cover the full screen — edges and corners included.
+    // No camera transform: these stars don't move when you pan/zoom.
+    const t = ts / 1300;
+    bgStars.forEach(s => {
+      const px = s.x * W;
+      const py = s.y * H;
+      const twinkle = 0.3 + 0.7 * Math.abs(Math.sin(t + s.ph));
+      ctx.globalAlpha = s.a * twinkle;
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath(); ctx.arc(px, py, s.r, 0, Math.PI * 2); ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+
+
+    // ── Moon (real phase) ──────────────────────────────────────
+    // Fixed top-right corner. Phase calculated from today's date.
+    {
+      const mx = W * 0.88, my = 70;
+      const R  = 28;
+
+      const knownNewMoon = new Date('2000-01-06T18:14:00Z');
+      const lunarCycle   = 29.530588853;
+      const daysSince    = (Date.now() - knownNewMoon) / 86400000;
+      const phaseDays    = ((daysSince % lunarCycle) + lunarCycle) % lunarCycle;
+      const phaseFrac    = phaseDays / lunarCycle;
+
+      // Outer glow
+      ctx.globalAlpha = 0.12; ctx.fillStyle = '#c0d0ff';
+      ctx.beginPath(); ctx.arc(mx, my, R + 28, 0, Math.PI * 2); ctx.fill();
+      ctx.globalAlpha = 0.28;
+      ctx.beginPath(); ctx.arc(mx, my, R + 12, 0, Math.PI * 2); ctx.fill();
+      ctx.globalAlpha = 1;
+
+      // Clip to moon circle
+      ctx.save();
+      ctx.beginPath(); ctx.arc(mx, my, R, 0, Math.PI * 2); ctx.clip();
+
+      // Dark base
+      ctx.fillStyle = '#0a0520';
+      ctx.fillRect(mx - R - 1, my - R - 1, R * 2 + 2, R * 2 + 2);
+
+      // Lit half
+      const waxing = phaseFrac <= 0.5;
+      ctx.fillStyle = '#eef2ff';
+      ctx.beginPath();
+      if (waxing) { ctx.arc(mx, my, R, -Math.PI / 2, Math.PI / 2); }
+      else        { ctx.arc(mx, my, R,  Math.PI / 2, Math.PI * 1.5); }
+      ctx.closePath(); ctx.fill();
+
+      // Terminator ellipse
+      const ex     = Math.abs(Math.cos(2 * Math.PI * phaseFrac)) * R;
+      const nearNew = phaseFrac < 0.25 || phaseFrac > 0.75;
+      ctx.fillStyle = nearNew ? '#0a0520' : '#eef2ff';
+      ctx.save();
+      ctx.translate(mx, my);
+      if (!waxing) ctx.scale(-1, 1);
+      ctx.beginPath();
+      ctx.ellipse(0, 0, ex, R, 0, -Math.PI / 2, Math.PI / 2);
+      ctx.closePath(); ctx.fill();
+      ctx.restore();
+
+      // Surface highlight
+      ctx.globalAlpha = 0.07; ctx.fillStyle = '#ffffff';
+      ctx.beginPath(); ctx.arc(mx - R * 0.2, my - R * 0.2, R * 0.5, 0, Math.PI * 2); ctx.fill();
+      ctx.globalAlpha = 1;
+      ctx.restore(); // end clip
+
+      // Phase name — R + 35 spacing as requested
+      const phaseNames = ['new moon','waxing crescent','first quarter','waxing gibbous',
+                          'full moon','waning gibbous','last quarter','waning crescent'];
+      ctx.font      = '12px "Courier New",monospace';
+      ctx.textAlign = 'center';
+      ctx.fillStyle = 'rgba(180,170,220,0.55)';
+      ctx.fillText(phaseNames[Math.round(phaseFrac * 8) % 8], mx, my + R + 35);
+    }
+
+
+    // ── Shooting stars ─────────────────────────────────────────
+    nextShoot -= dt;
+    if (nextShoot <= 0) {
+      // Pick a random starting edge (top or left) and aim diagonally
+      // inward so the star always travels across visible sky.
+      // angle is between 20°–70° below horizontal for a natural look.
+      const angle  = (20 + Math.random() * 50) * Math.PI / 180;
+      const speed  = 4 + Math.random() * 3;  // slower so it's easier to see
+      // Start anywhere along the top edge OR the left edge
+      const onTop  = Math.random() < 0.5;
+      const sx     = onTop ? Math.random() * W         : -30;
+      const sy     = onTop ? -30                       : Math.random() * H * 0.7;
+      shooters.push({
+        x: sx, y: sy,
+        vx: speed * Math.cos(angle),
+        vy: speed * Math.sin(angle),
+        life: 1, trail: []
+      });
+      nextShoot = 5000 + Math.random() * 9000;
+    }
+    shooters = shooters.filter(s => s.life > 0);
+    shooters.forEach(s => {
+      s.trail.push({ x: s.x, y: s.y });
+      if (s.trail.length > 32) s.trail.shift();  // longer trail
+      s.x += s.vx; s.y += s.vy; s.life -= 0.008;  // fades slower
+
+      for (let i = 1; i < s.trail.length; i++) {
+        ctx.globalAlpha = Math.max(0, (i / s.trail.length) * s.life * 1.0);
+        ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2.5;  // brighter, thicker
+        ctx.beginPath();
+        ctx.moveTo(s.trail[i-1].x, s.trail[i-1].y);
+        ctx.lineTo(s.trail[i].x,   s.trail[i].y);
+        ctx.stroke();
+      }
+      if (s.life > 0.05) {
+        ctx.globalAlpha = s.life * 0.9;
+        ctx.fillStyle = '#ffffff';
+        ctx.beginPath(); ctx.arc(s.x, s.y, 2.8, 0, Math.PI * 2); ctx.fill();  // bigger head
+      }
+      ctx.globalAlpha = 1;
+    });
+
+
+    // ── Constellation lines (smooth fade) ─────────────────────
+    if (hoverId) lineAlpha = Math.min(1, lineAlpha + dt * 0.014);
+    else         lineAlpha = Math.max(0, lineAlpha - dt * 0.012);
+    if (!hoverId && lineAlpha <= 0) prevHover = null;
+    const lineSource = hoverId || prevHover;
+
+    if (lineSource && lineAlpha > 0) {
+      const rels = getRelatives(lineSource);
+      const hp   = positions[lineSource];
+      if (hp) {
+        const [hsx, hsy] = toScreen(hp.x, hp.y);
+        rels.forEach(rid => {
+          const rp = positions[rid]; if (!rp) return;
+          const [rsx, rsy] = toScreen(rp.x, rp.y);
+          ctx.beginPath(); ctx.moveTo(hsx, hsy); ctx.lineTo(rsx, rsy);
+          ctx.strokeStyle = `rgba(180,160,255,${0.38 * lineAlpha})`;
+          ctx.lineWidth = 1; ctx.setLineDash([4, 7]); ctx.stroke(); ctx.setLineDash([]);
+        });
+      }
+    }
+    if (hoverId) prevHover = hoverId;
+
+
+    // ── Person stars ───────────────────────────────────────────
+    Object.entries(people).forEach(([id, p]) => {
+      const pos = positions[id]; if (!pos) return;
+      const [sx, sy] = toScreen(pos.x, pos.y);
+      if (sx < -80 || sx > W + 80 || sy < -80 || sy > H + 80) return;
+
+      const isHov = hoverId === id;
+      const isRel = hoverId && getRelatives(hoverId).includes(id);
+      // Big stars (size>=12) pulse at 2.5× speed; small stars unchanged
+      const pulseRate = p.size >= 12 ? 0.00425 : 0.0017;
+      const pulse = 1 + 0.07 * Math.sin(ts * pulseRate + pos.x * 0.01 + pos.y * 0.008);
+      const baseR = p.size * cam.zoom;
+      const drawR = baseR * (isHov ? 1.5 : pulse);
+
+      if (isHov || isRel) {
+        const gr  = drawR * (isHov ? 4.5 : 3);
+        const gg  = ctx.createRadialGradient(sx, sy, 0, sx, sy, gr);
+        const rgb = hexToRgb(p.color);
+        gg.addColorStop(0, `rgba(${rgb},${isHov ? 0.32 : 0.13})`);
+        gg.addColorStop(1, `rgba(${rgb},0)`);
+        ctx.fillStyle = gg;
+        ctx.beginPath(); ctx.arc(sx, sy, gr, 0, Math.PI * 2); ctx.fill();
+      }
+
+      drawStarShape(sx, sy, drawR, p.color, isHov ? 1 : 0.88);
+
+      // Hover name label — clean ?? placeholders before display
+      if (isHov) {
+        const rawParts = p.name.split(' ');
+        const cleanName = rawParts
+          .filter(w => w !== '??')
+          .join(' ') || 'Unknown';
+        ctx.font = 'bold 15px "Courier New",monospace';
+        ctx.textAlign = 'center';
+        const tw = ctx.measureText(cleanName).width;
+        const ly = sy - drawR - 15;
+        ctx.fillStyle = 'rgba(4,2,18,0.88)';
+        ctx.fillRect(sx - tw/2 - 10, ly - 17, tw + 20, 23);
+        ctx.fillStyle = p.color;
+        ctx.fillText(cleanName, sx, ly);
+      }
+
+      // Always-visible first name for large stars when zoomed enough
+      if (!isHov && p.size >= 12 && cam.zoom > 0.35) {
+        // Show first known name part, skip ?? placeholders
+        const firstKnownPart = p.name.split(' ').find(w => w !== '??') || 'Unknown';
+        ctx.font = `${Math.round(12 * cam.zoom)}px "Courier New",monospace`;
+        ctx.textAlign = 'center';
+        ctx.fillStyle = 'rgba(200,180,255,0.42)';
+        ctx.fillText(firstKnownPart, sx, sy + drawR + 14 * cam.zoom);
+      }
+    });
+
+
+    // ── Sparkle particles ──────────────────────────────────────
+    sparkles = sparkles.filter(s => s.life > 0);
+    sparkles.forEach(s => {
+      s.x += s.vx; s.y += s.vy; s.vy += 0.06; s.life -= 0.022;
+      drawStarShape(s.x, s.y, s.r * s.life, s.color, s.life * 0.9);
+    });
+    ctx.globalAlpha = 1;
+
+    requestAnimationFrame(draw);
+  }
+
+
+  // ══════════════════════════════════════════════════════════════
+  //  15. MOUSE & INTERACTION
+  //
+  //  DRAG CLAMPING:
+  //  At minimum zoom the world exactly fills the screen, so dragging
+  //  would just show empty space — we disable it entirely.
+  //  At any zoom above minZoom, dragging is allowed but clamped so
+  //  you can never scroll past the edge of the star field.
+  //  clampCamera() does this after every pan update.
+  // ══════════════════════════════════════════════════════════════
+
+  const wrap = document.getElementById('wrap');
+
+  function getHoverId(mx, my) {
+    let found = null, minD = Infinity;
+    Object.entries(people).forEach(([id, p]) => {
+      const pos = positions[id]; if (!pos) return;
+      const [sx, sy] = toScreen(pos.x, pos.y);
+      const d   = Math.hypot(sx - mx, sy - my);
+      const hit = Math.max(p.size * cam.zoom * 2.2, 18);
+      if (d < hit && d < minD) { minD = d; found = id; }
+    });
+    return found;
+  }
+
+  // Track whether we're at min zoom to decide cursor and drag
+  function atMinZoom() { return cam.zoom <= cam.minZoom * 1.01; }
+
+  wrap.addEventListener('mousemove', e => {
+    if (drag.active) {
+      if (atMinZoom()) { drag.active = false; return; } // safety: no drag at min zoom
+      cam.x = drag.cx - (e.clientX - drag.sx) / cam.zoom;
+      cam.y = drag.cy - (e.clientY - drag.sy) / cam.zoom;
+      clampCamera(); // prevent dragging into empty space
+      hoverId = null;
+      return;
+    }
+    hoverId = getHoverId(e.clientX, e.clientY);
+    // Show default cursor at min zoom, grab otherwise
+    wrap.style.cursor = hoverId ? 'pointer' : (atMinZoom() ? 'default' : 'grab');
+  });
+
+  wrap.addEventListener('mouseleave', () => { hoverId = null; drag.active = false; });
+
+  wrap.addEventListener('mousedown', e => {
+    // Always record the click position so mouseup can measure movement.
+    // Only activate dragging if we're zoomed in past minZoom.
+    drag = { active: !atMinZoom(), sx:e.clientX, sy:e.clientY, cx:cam.x, cy:cam.y };
+    if (!atMinZoom()) wrap.classList.add('dragging');
+  });
+
+  wrap.addEventListener('mouseup', e => {
+    const moved = Math.hypot(e.clientX - drag.sx, e.clientY - drag.sy);
+    drag.active = false;
+    wrap.classList.remove('dragging');
+    // Treat as a click if the mouse barely moved
+    if (moved < 5) {
+      const id = getHoverId(e.clientX, e.clientY);
+      if (id) openPanel(id);
+    }
+  });
+
+  // SCROLL: zoom toward cursor, clamped between minZoom and 5×
+  // After zooming, clampCamera() prevents drifting outside world bounds.
+  wrap.addEventListener('wheel', e => {
+    // If the cursor is inside the panel, let the panel scroll naturally.
+    // We check by seeing if the event target is inside #panel.
+    if (document.getElementById('panel').contains(e.target)) return;
+    if (document.getElementById('modal-backdrop').contains(e.target)) return;
+    e.preventDefault();
+    const [wx, wy] = toWorld(e.clientX, e.clientY);
+    const factor   = e.deltaY < 0 ? 1.12 : 0.9;
+    cam.zoom = Math.max(cam.minZoom, Math.min(5, cam.zoom * factor));
+    cam.x = wx - (e.clientX - W / 2) / cam.zoom;
+    cam.y = wy - (e.clientY - H / 2) / cam.zoom;
+    clampCamera();
+  }, { passive: false });
+
+
+  // ══════════════════════════════════════════════════════════════
+  //  16. SPARKLE BURST
+  // ══════════════════════════════════════════════════════════════
+
+  function spawnSparkles(id) {
+    const pos = positions[id]; if (!pos) return;
+    const [sx, sy] = toScreen(pos.x, pos.y);
+    const p = people[id];
+    for (let i = 0; i < 20; i++) {
+      const ang = Math.random() * Math.PI * 2;
+      const spd = 1.2 + Math.random() * 3.5;
+      sparkles.push({
+        x: sx, y: sy,
+        vx: Math.cos(ang) * spd, vy: Math.sin(ang) * spd - 1.2,
+        r: 1.5 + Math.random() * 2.2, color: p.color, life: 1
+      });
+    }
+  }
+
+
+  // ══════════════════════════════════════════════════════════════
+  //  17. ANCESTRY CHART BUILDER  (pure SVG — no foreignObject)
+  //
+  //  Draws the entire family tree as native SVG rect+text elements.
+  //  No foreignObject means no browser clipping bugs.
+  //
+  //  LAYOUT — rows ordered oldest at top, youngest at bottom:
+  //    All ancestors above the focal row, all descendants below.
+  //    The focal person's row is scrolled into view on open.
+  //
+  //  GENDER COLORS:
+  //    male   → blue tint card border + header bar
+  //    female → rose tint card border + header bar
+  //    unknown → neutral purple
+  //
+  //  FONTS: minimum 14px as requested.
+  // ══════════════════════════════════════════════════════════════
+
+  // Card geometry
+  const CW       = 160;   // card width
+  const CH       = 82;    // card height
+  const HBAR     = 22;    // coloured header bar height inside card
+  const CGAP     = 28;    // horizontal gap between cards
+  const RGAP     = 72;    // vertical gap between rows
+  const RH       = CH + RGAP;
+  const LABEL_W  = 160;   // reserved left margin for generation labels
+                           // cards are laid out starting at x = LABEL_W + padding
+
+  // Gender colours — add a `gender` field to people entries ('m' / 'f')
+  // Defaults to neutral if not set.
+  function genderColors(id) {
+    const g = people[id]?.gender;
+    if (g === 'm') return { bar:'rgba(80,140,255,0.55)',  border:'rgba(80,160,255,0.5)',  glow:'rgba(80,140,255,0.18)' };
+    if (g === 'f') return { bar:'rgba(220,100,160,0.55)', border:'rgba(240,120,180,0.5)', glow:'rgba(220,100,160,0.18)' };
+    return          { bar:'rgba(120,90,200,0.45)',  border:'rgba(140,120,220,0.4)', glow:'rgba(120,90,200,0.15)' };
+  }
+
+  // Draw one person card as SVG — returns an SVG <g> string
+  function svgCard(id, x, y, isFocal) {
+    const p = people[id]; if (!p) return '';
+    const gc   = genderColors(id);
+    const name = p.name;
+    // Split name for two lines: first name / last name
+    // Parse name respecting ?? placeholders.
+    // "??" means that part is unknown — don't display it.
+    // Rules:
+    //   "?? ??"      → both unknown         → display "Unknown"
+    //   "Zohreh ??"  → first known only     → display first name, no last
+    //   "John Smith" → both known           → display normally
+    const parts     = name.split(' ');
+    const rawFirst  = parts[0];
+    const rawLast   = parts.slice(1).join(' ');
+    const firstKnown = rawFirst !== '??';
+    const lastKnown  = rawLast !== '' && rawLast !== '??' && !rawLast.match(/^\?\?/);
+    const firstName  = firstKnown ? rawFirst : (lastKnown ? '' : 'Unknown');
+    const lastName   = lastKnown  ? rawLast  : '';
+    const years     = p.died ? `${p.born} – ${p.died}` : `b. ${p.born}`;
+
+    // Focal card gets a brighter border and outer glow rect
+    const borderColor  = isFocal ? 'rgba(220,200,255,0.9)' : gc.border;
+    const borderWidth  = isFocal ? 2.5 : 1.5;
+    const bgFill       = isFocal ? 'rgba(160,140,255,0.28)' : 'rgba(255,255,255,0.10)';
+
+    let g = `<g class="sv-card" onclick="openPanel('${id}')" style="cursor:pointer;">`;
+
+    // Outer glow for focal
+    if (isFocal) {
+      g += `<rect x="${x-6}" y="${y-6}" width="${CW+12}" height="${CH+12}"
+        rx="14" fill="${gc.glow}" opacity="0.7"/>`;
+      g += `<rect x="${x-10}" y="${y-10}" width="${CW+20}" height="${CH+20}"
+        rx="16" fill="${gc.glow}" opacity="0.3"/>`;
+    }
+
+    // Card background
+    g += `<rect class="card-bg" x="${x}" y="${y}" width="${CW}" height="${CH}"
+      rx="9" fill="${bgFill}" stroke="${borderColor}" stroke-width="${borderWidth}"/>`;
+
+    // Coloured header bar (gender indicator) — clipped to top of card with rounded top
+    g += `<rect x="${x+borderWidth}" y="${y+borderWidth}" width="${CW - borderWidth*2}" height="${HBAR}"
+      rx="7" fill="${gc.bar}" opacity="0.85"/>`;
+    // Square off the bottom of the header bar
+    g += `<rect x="${x+borderWidth}" y="${y+borderWidth+HBAR/2}" width="${CW - borderWidth*2}" height="${HBAR/2}"
+      fill="${gc.bar}" opacity="0.85"/>`;
+
+    // Star dot (matches sky star color)
+    g += `<circle cx="${x + CW - 16}" cy="${y + HBAR/2 + borderWidth}" r="5" fill="${p.color}" opacity="0.9"/>`;
+
+    // First name (in header bar)
+    g += `<text x="${x + CW/2}" y="${y + borderWidth + HBAR - 5}"
+      text-anchor="middle" font-family="Courier New, monospace"
+      font-size="14" font-weight="bold" fill="rgba(240,230,255,0.95)">${firstName}</text>`;
+
+    // Last name
+    g += `<text x="${x + CW/2}" y="${y + HBAR + 22}"
+      text-anchor="middle" font-family="Courier New, monospace"
+      font-size="13" fill="rgba(200,185,240,0.8)">${lastName}</text>`;
+
+    // Years
+    g += `<text x="${x + CW/2}" y="${y + HBAR + 42}"
+      text-anchor="middle" font-family="Courier New, monospace"
+      font-size="12" fill="rgba(140,120,200,0.7)">${years}</text>`;
+
+    // Pixel corner brackets — four 2×2 clusters of tiny rects at each corner
+    const br = 4; // bracket arm length in px
+    const bw = 2; // bracket line width
+    const bclr = isFocal ? "rgba(220,200,255,0.7)" : "rgba(140,120,220,0.4)";
+    // Top-left
+    g += `<rect x="${x+1}" y="${y+1}" width="${br}" height="${bw}" fill="${bclr}"/>`;
+    g += `<rect x="${x+1}" y="${y+1}" width="${bw}" height="${br}" fill="${bclr}"/>`;
+    // Top-right
+    g += `<rect x="${x+CW-1-br}" y="${y+1}" width="${br}" height="${bw}" fill="${bclr}"/>`;
+    g += `<rect x="${x+CW-1-bw}" y="${y+1}" width="${bw}" height="${br}" fill="${bclr}"/>`;
+    // Bottom-left
+    g += `<rect x="${x+1}" y="${y+CH-1-bw}" width="${br}" height="${bw}" fill="${bclr}"/>`;
+    g += `<rect x="${x+1}" y="${y+CH-1-br}" width="${bw}" height="${br}" fill="${bclr}"/>`;
+    // Bottom-right
+    g += `<rect x="${x+CW-1-br}" y="${y+CH-1-bw}" width="${br}" height="${bw}" fill="${bclr}"/>`;
+    g += `<rect x="${x+CW-1-bw}" y="${y+CH-1-br}" width="${bw}" height="${br}" fill="${bclr}"/>`;
+
+    g += `</g>`;
+    return g;
+  }
+
+  // Connector line (dashed purple)
+  function svgLine(x1,y1,x2,y2) {
+    return `<line x1="${Math.round(x1)}" y1="${Math.round(y1)}"
+      x2="${Math.round(x2)}" y2="${Math.round(y2)}"
+      stroke="rgba(160,140,255,0.3)" stroke-width="1.5" stroke-dasharray="5 5"/>`;
+  }
+
+  // Marriage/divorce connector between two cards at the same y.
+  // Pass isDivorced=true to show a broken line with ✕ instead of ♥.
+  //
+  // Marriage:  solid pink line  ───♥───
+  // Divorced:  dashed red line  ── ✕ ──  with a gap in the middle
+  function svgMarriage(ax, ay, bx, isDivorced) {
+    const midX  = (ax + CW + bx) / 2;
+    const lineY = ay + CH * 0.38;
+    const gapW  = 22; // gap around the symbol
+
+    if (isDivorced) {
+      // Two dashed red segments with a ✕ in the gap
+      return `
+        <line x1="${ax+CW}" y1="${lineY}" x2="${midX - gapW}" y2="${lineY}"
+          stroke="rgba(220,80,80,0.55)" stroke-width="1.5" stroke-dasharray="4 3"/>
+        <line x1="${midX + gapW}" y1="${lineY}" x2="${bx}" y2="${lineY}"
+          stroke="rgba(220,80,80,0.55)" stroke-width="1.5" stroke-dasharray="4 3"/>
+        <text x="${midX}" y="${lineY + 6}" text-anchor="middle"
+          font-size="18" font-weight="bold"
+          fill="rgba(220,90,90,0.85)" font-family="sans-serif">✕</text>
+        <title>Divorced</title>`;
+    } else {
+      // Solid pink line with a large ♥ centred
+      return `
+        <line x1="${ax+CW}" y1="${lineY}" x2="${midX - gapW}" y2="${lineY}"
+          stroke="rgba(220,140,180,0.5)" stroke-width="1.5"/>
+        <line x1="${midX + gapW}" y1="${lineY}" x2="${bx}" y2="${lineY}"
+          stroke="rgba(220,140,180,0.5)" stroke-width="1.5"/>
+        <text x="${midX}" y="${lineY + 7}" text-anchor="middle"
+          font-size="20" fill="rgba(230,150,190,0.85)" font-family="serif">♥</text>`;
+    }
+  }
+
+  // Row section label — sits in the reserved LABEL_W column to the left of cards
+  function svgLabel(text, y) {
+    // Wrap long labels onto two lines at a space
+    const words  = text.toUpperCase().split(' ');
+    const half   = Math.ceil(words.length / 2);
+    const line1  = words.slice(0, half).join(' ');
+    const line2  = words.slice(half).join(' ');
+    const lx     = LABEL_W - 16; // right-align within the label column
+    const ly     = y + CH / 2;
+    let out = '';
+    if (line2) {
+      out += `<text x="${lx}" y="${ly - 8}" text-anchor="end"
+        font-family="Courier New, monospace" font-size="13" font-weight="bold"
+        fill="rgba(160,140,230,0.65)" letter-spacing="1.5">${line1}</text>`;
+      out += `<text x="${lx}" y="${ly + 10}" text-anchor="end"
+        font-family="Courier New, monospace" font-size="13" font-weight="bold"
+        fill="rgba(160,140,230,0.65)" letter-spacing="1.5">${line2}</text>`;
+    } else {
+      out += `<text x="${lx}" y="${ly + 5}" text-anchor="end"
+        font-family="Courier New, monospace" font-size="13" font-weight="bold"
+        fill="rgba(160,140,230,0.65)" letter-spacing="1.5">${line1}</text>`;
+    }
+    // Subtle vertical tick line between label and cards
+    out += `<line x1="${lx + 8}" y1="${y + 10}" x2="${lx + 8}" y2="${y + CH - 10}"
+      stroke="rgba(140,120,210,0.2)" stroke-width="1"/>`;
+    return out;
+  }
+
+  // ── Main chart builder ──────────────────────────────────────
+  function buildAncestryChart(fid) {
+    const focal = people[fid]; if (!focal) return '';
+
+    // Helper: pair people with their spouses.
+    // If a person has a spouse, always show them side by side even if the
+    // spouse is not in the ids list (married-in spouses with no family parents).
+    // divorced:true switches the heart to a red X line.
+    function pairUp(ids) {
+      const used = new Set(), pairs = [];
+      ids.forEach(id => {
+        if (used.has(id)) return;
+        const sp = people[id]?.spouse;
+        if (sp && !used.has(sp)) {
+          const divorced = !!(people[id]?.divorced || people[sp]?.divorced);
+          pairs.push({ a:id, b:sp, divorced });
+          used.add(id); used.add(sp);
+        } else {
+          pairs.push({ a:id, b:null });
+          used.add(id);
+        }
+      });
+      return pairs;
+    }
+
+    // ── Collect ALL generations ────────────────────────────────
+    // We walk up and down from the focal person collecting every
+    // known person in the dataset, then sort them into generation rows.
+    // Generation 0 = focal person's generation.
+
+    // Assign generation numbers by BFS up from focal
+    const genOf = {};
+    function walkUp(id, gen) {
+      if (genOf[id] !== undefined) return;
+      genOf[id] = gen;
+      const p = people[id]; if (!p) return;
+      if (p.spouse) genOf[p.spouse] = gen; // spouse same generation
+      (p.parents || []).forEach(pid => walkUp(pid, gen - 1));
+    }
+    function walkDown(id, gen) {
+      if (genOf[id] !== undefined && genOf[id] <= gen) return;
+      genOf[id] = gen;
+      Object.entries(people).forEach(([cid, cp]) => {
+        if ((cp.parents || []).includes(id)) walkDown(cid, gen + 1);
+      });
+    }
+
+    walkUp(fid, 0);
+    walkDown(fid, 0);
+
+    // Also assign spouses the same generation as their partner
+    Object.entries(people).forEach(([id, p]) => {
+      if (p.spouse && genOf[id] !== undefined && genOf[p.spouse] === undefined) {
+        genOf[p.spouse] = genOf[id];
+      }
+    });
+    // And anyone still unassigned who has a known parent
+    Object.entries(people).forEach(([id, p]) => {
+      if (genOf[id] !== undefined) return;
+      const knownParent = (p.parents || []).find(pid => genOf[pid] !== undefined);
+      if (knownParent) genOf[id] = genOf[knownParent] + 1;
+    });
+
+    // Group by generation
+    const genMap = {};
+    Object.entries(genOf).forEach(([id, g]) => {
+      if (!genMap[g]) genMap[g] = [];
+      if (!genMap[g].includes(id)) genMap[g].push(id);
+    });
+
+    const genNums = Object.keys(genMap).map(Number).sort((a,b) => a-b);
+
+    // Build rows array: one entry per generation, sorted oldest first
+    const LABELS = {
+      '-4':'great-great-grandparents', '-3':'great-grandparents',
+      '-2':'grandparents', '-1':'parents', '0':'your generation',
+      '1':'children', '2':'grandchildren', '3':'great-grandchildren'
+    };
+
+    const rows = genNums.map(g => ({
+      gen:   g,
+      label: LABELS[String(g)] || (g < 0 ? `ancestors +${-g}` : `descendants +${g}`),
+      pairs: pairUp(genMap[g]),
+      isFocalRow: g === 0
+    }));
+
+    // ── Layout ─────────────────────────────────────────────────
+    function pairW(pair) { return pair.b ? CW*2 + CGAP : CW; }
+    function rowW(pairs)  {
+      if (!pairs.length) return CW;
+      return pairs.reduce((s,p) => s + pairW(p), 0) + (pairs.length-1)*CGAP;
+    }
+
+    const maxRW = Math.max(...rows.map(r => rowW(r.pairs)));
+    // svgW reserves LABEL_W on the left for generation labels,
+    // then the cards area, then 60px right padding.
+    const svgW  = LABEL_W + maxRW + 60;
+
+    const rowLayouts = rows.map((row, ri) => {
+      const rw = rowW(row.pairs);
+      // Centre the cards within the space to the right of the label column
+      let x    = LABEL_W + (svgW - LABEL_W - rw) / 2;
+      const pairPositions = row.pairs.map(pair => {
+        const pos = { pair, x };
+        x += pairW(pair) + CGAP;
+        return pos;
+      });
+      return { ...row, y: ri * RH + 50, pairPositions };
+    });
+
+    const svgH = rows.length * RH + CH + 80;
+
+    // ── Build SVG strings ──────────────────────────────────────
+    let lines = '', labels = '', cards = '';
+    const botOf = {}, topOf = {};
+
+    // Pass 1: record positions and draw cards + marriage lines
+    rowLayouts.forEach(row => {
+      labels += svgLabel(row.label, row.y);
+      row.pairPositions.forEach(({ pair, x }) => {
+        const isFocal = row.isFocalRow && pair.focal;
+        const ay = row.y;
+
+        cards += svgCard(pair.a, x, ay, isFocal);
+        botOf[pair.a] = [x + CW/2, ay + CH];
+        topOf[pair.a] = [x + CW/2, ay];
+
+        if (pair.b && people[pair.b]) {
+          const bx = x + CW + CGAP;
+          cards += svgCard(pair.b, bx, ay, false);
+          botOf[pair.b] = [bx + CW/2, ay + CH];
+          topOf[pair.b] = [bx + CW/2, ay];
+          lines += svgMarriage(x, ay, bx, pair.divorced);
+        }
+      });
+    });
+
+    // Pass 2: draw connector lines between generations
+    rowLayouts.forEach((row, ri) => {
+      if (ri === 0) return;
+      row.pairPositions.forEach(({ pair }) => {
+        [pair.a, pair.b].filter(Boolean).forEach(id => {
+          const p = people[id]; if (!p) return;
+          const parHere = (p.parents || []).filter(pid => botOf[pid]);
+          if (!parHere.length) return;
+          const [ctX, ctY] = topOf[id];
+
+          if (parHere.length === 2) {
+            const [pax, pay] = botOf[parHere[0]];
+            const [pbx, pby] = botOf[parHere[1]];
+            const midX = (pax + pbx) / 2;
+            const midY = pay + (ctY - pay) * 0.45;
+            // Line from each parent down to the midpoint, then down to child
+            lines += svgLine(pax, pay, midX, midY);
+            lines += svgLine(pbx, pby, midX, midY);
+            lines += svgLine(midX, midY, ctX, ctY);
+          } else {
+            const [px, py] = botOf[parHere[0]];
+            lines += svgLine(px, py, ctX, ctY);
+          }
+        });
+      });
+    });
+
+    // Focal row data-attr so we can scroll to it
+    const focalRowY = rowLayouts.find(r => r.isFocalRow)?.y ?? 0;
+
+    return `<svg id="tree-svg" width="${svgW}" height="${svgH}"
+        data-focal-y="${focalRowY}"
+        xmlns="http://www.w3.org/2000/svg" style="overflow:visible;">
+      ${lines}
+      ${labels}
+      ${cards}
+    </svg>`;
+  }
+
+
+  // ══════════════════════════════════════════════════════════════
+  //  18. OPEN PANEL
+  // ══════════════════════════════════════════════════════════════
+
+  function openPanel(id) {
+    const p = people[id]; if (!p) return;
+    spawnSparkles(id);
+
+    // ── Typing animation on the panel title ──────────────────
+    // Clears the title and types each character one by one,
+    // then adds a blinking cursor at the end.
+    const ptEl = document.getElementById('pt');
+    ptEl.innerHTML = '<span id="header-star">✦</span>';
+    let charIdx = 0;
+    // Clean ?? placeholders from the name before typing it
+    const fullName = p.name.split(' ').filter(w => w !== '??').join(' ') || 'Unknown';
+    // Clear any existing typing interval
+    if (window._typingTimer) clearInterval(window._typingTimer);
+    // Remove old cursor if present
+    const oldCursor = ptEl.querySelector('.typing-cursor');
+    if (oldCursor) oldCursor.remove();
+    // Add cursor immediately
+    const cursor = document.createElement('span');
+    cursor.className = 'typing-cursor';
+    ptEl.appendChild(cursor);
+    // Type characters one by one
+    window._typingTimer = setInterval(() => {
+      if (charIdx < fullName.length) {
+        cursor.insertAdjacentText('beforebegin', fullName[charIdx]);
+        charIdx++;
+      } else {
+        clearInterval(window._typingTimer);
+        // Cursor keeps blinking after typing completes
+      }
+    }, 55);
+
+    // ── Build chart and inject ────────────────────────────────
+    document.getElementById('tree-svg-wrap').innerHTML = buildAncestryChart(id);
+    document.getElementById('panel').classList.add('open');
+    document.getElementById('modal-backdrop').classList.add('open');
+
+    // ── Staggered card load-in animation ─────────────────────
+    // Each .sv-card gets a progressively longer animation-delay
+    // so cards appear to load in from top to bottom.
+    setTimeout(() => {
+      const cards = document.querySelectorAll('#tree-svg-wrap .sv-card');
+      cards.forEach((card, i) => {
+        card.style.animationDelay = `${i * 40}ms`;
+        card.style.animationFillMode = 'both';
+      });
+    }, 50);
+
+    // ── Scroll focal row into centre ─────────────────────────
+    setTimeout(() => {
+      const svg   = document.getElementById('tree-svg');
+      const wrap  = document.getElementById('tree-svg-wrap');
+      const panel = document.getElementById('panel');
+      if (!svg) return;
+      const focalY = parseFloat(svg.dataset.focalY) || 0;
+      const target = focalY + wrap.offsetTop - panel.clientHeight / 2 + (CH / 2);
+      panel.scrollTo({ top: Math.max(0, target), behavior: 'smooth' });
+    }, 380);
+  }
+  window.openPanel = openPanel;
+
+  // Close via the X button
+  document.getElementById('pc').addEventListener('click', closePanel);
+  // Close via clicking the backdrop
+  document.getElementById('modal-backdrop').addEventListener('click', closePanel);
+
+  function closePanel() {
+    document.getElementById('panel').classList.remove('open');
+    document.getElementById('modal-backdrop').classList.remove('open');
+    // Stop typing animation
+    if (window._typingTimer) clearInterval(window._typingTimer);
+  }
+
+
+  // ══════════════════════════════════════════════════════════════
+  //  19. INTRO OVERLAY — dismiss on click
+  //
+  //  The intro is visible immediately and stays until the user
+  //  clicks anywhere on it. We listen for a click on #intro itself,
+  //  fade it out, then remove pointer-events so it doesn't block
+  //  interaction with the canvas underneath.
+  // ══════════════════════════════════════════════════════════════
+
+  const intro = document.getElementById('intro');
+  intro.addEventListener('click', () => {
+    intro.style.opacity = '0';
+    // After the fade transition ends, disable pointer events
+    // so it's fully transparent to clicks from then on.
+    intro.addEventListener('transitionend', () => {
+      intro.style.pointerEvents = 'none';
+    }, { once: true });
+  });
+
+
+  // ══════════════════════════════════════════════════════════════
+  //  20. HELP BUTTON & MODAL
+  //
+  //  The ? button (bottom-right) toggles the help modal.
+  //  The modal has the same instructions as the intro overlay.
+  //  Clicking the modal itself closes it.
+  // ══════════════════════════════════════════════════════════════
+
+  const helpBtn   = document.getElementById('help-btn');
+  const helpModal = document.getElementById('help-modal');
+
+  // Open help modal
+  helpBtn.addEventListener('click', () => {
+    helpModal.classList.add('visible');
+  });
+
+  // Close help modal when user clicks on it
+  helpModal.addEventListener('click', () => {
+    helpModal.classList.remove('visible');
+  });
+
+
+  // ══════════════════════════════════════════════════════════════
+  //  21. CLOCK & DATE BAR
+  // ══════════════════════════════════════════════════════════════
+
+  function updateClock() {
+    const now = new Date();
+    const hh  = now.getHours().toString().padStart(2, '0');
+    const mm  = now.getMinutes().toString().padStart(2, '0');
+    const ss  = now.getSeconds().toString().padStart(2, '0');
+    document.getElementById('clock-time').textContent = `${hh}:${mm}:${ss}`;
+    document.getElementById('clock-date').textContent = now.toLocaleDateString(undefined, {
+      weekday:'long', day:'numeric', month:'long', year:'numeric'
+    });
+  }
+  updateClock();
+  setInterval(updateClock, 1000);
+
+
+  // ══════════════════════════════════════════════════════════════
+  //  22. STARTUP
+  // ══════════════════════════════════════════════════════════════
+
+  window.addEventListener('resize', resize);
+  resize();
+  assignPositions();
+  requestAnimationFrame(draw);
+
+</script>
+</body>
+</html>
