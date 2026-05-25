@@ -1,4 +1,4 @@
-# Family Constellation by Saba Cyr
+# Family Tree in Constellation Style by Saba Cyr
  
 My grandmother used to tell me that the stars in the sky are our loved ones and families who have passed, looking down at us to protect us. I never forgot that. This project is my way of keeping that idea alive. Every person in my family gets a star. The older they are, the brighter and bigger it burns. You can hover over them, watch the constellation lines reach out to their family, and click to open their story.
  
